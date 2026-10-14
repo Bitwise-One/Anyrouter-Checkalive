@@ -4,19 +4,18 @@ setup_file() {
 }
 
 setup() {
-    export TEST_TOKEN="sk-ant-test12345678"
+    export TEST_TOKEN="sk-test12345678"
     export TEST_DIR=$(mktemp -d)
     export HOME="$TEST_DIR"
-    export CI="true"
 
-    # Mock claude globally so all tests that call it don't hang
+    # Mock codex globally so all tests that call it don't hang
     mkdir -p "$TEST_DIR/mock_bin"
-    cat > "$TEST_DIR/mock_bin/claude" << 'MOCK'
+    cat > "$TEST_DIR/mock_bin/codex" << 'MOCK'
 #!/usr/bin/env bash
-echo "Mock claude: healthy"
+echo "Mock codex: healthy"
 exit 0
 MOCK
-    chmod +x "$TEST_DIR/mock_bin/claude"
+    chmod +x "$TEST_DIR/mock_bin/codex"
     export PATH="$TEST_DIR/mock_bin:$PATH"
 }
 
@@ -30,10 +29,10 @@ teardown() {
     [[ "$output" == *"Usage"* ]]
 }
 
-@test "keepalive.sh creates and cleans up settings.json" {
+@test "keepalive.sh creates and cleans up config.toml" {
     run bash scripts/keepalive.sh "$TEST_TOKEN" "https://anyrouter.top/v1"
-    # After run, settings.json should be cleaned up
-    [ ! -f "$TEST_DIR/.claude/settings.json" ]
+    # After run, config.toml should be cleaned up
+    [ ! -f "$TEST_DIR/.codex/config.toml" ]
 }
 
 @test "keepalive.sh picks a prompt from prompts.txt" {
@@ -51,16 +50,16 @@ teardown() {
 }
 
 @test "run-all.sh parses single token from env" {
-    export ANYROUTER_TOKENS="sk-ant-testAAA"
+    export ANYROUTER_TOKENS="sk-testAAA"
     run timeout 5 bash scripts/run-all.sh 2>&1 || true
     [ "$status" -eq 124 ] || true  # 124 = timeout, which is expected
     [[ "$output" == *"Loaded 1 token(s)"* ]]
 }
 
 @test "run-all.sh parses multiple tokens from env" {
-    export ANYROUTER_TOKENS="sk-ant-testAAA
-sk-ant-testBBB
-sk-ant-testCCC"
+    export ANYROUTER_TOKENS="sk-testAAA
+sk-testBBB
+sk-testCCC"
     run timeout 5 bash scripts/run-all.sh 2>&1 || true
     [[ "$output" == *"Loaded 3 token(s)"* ]]
 }
@@ -72,14 +71,26 @@ sk-ant-testCCC"
     done < scripts/prompts.txt
 }
 
-@test "settings.json atomic write pattern works" {
-    local dir="$TEST_DIR/.claude"
-    local file="$dir/settings.json"
-    local tmp="$dir/settings.json.tmp.$$.$(date +%s%N)"
+@test "config.toml atomic write pattern works" {
+    local dir="$TEST_DIR/.codex"
+    local file="$dir/config.toml"
+    local tmp="$dir/config.toml.tmp.$$.$(date +%s%N)"
     mkdir -p "$dir"
-    cat > "$tmp" <<< '{"env":{"ANTHROPIC_AUTH_TOKEN":"test","ANTHROPIC_BASE_URL":"https://test.com/v1"}}'
+    cat > "$tmp" << 'EOF'
+model = "gpt-6-astra"
+model_provider = "anyrouter"
+preferred_auth_method = "apikey"
+forced_login_method = "api"
+
+[model_providers.anyrouter]
+name = "Anyrouter"
+base_url = "https://anyrouter.top/v1"
+env_key = "ANYROUTER_TOKEN"
+wire_api = "responses"
+EOF
     mv "$tmp" "$file"
     [ -f "$file" ]
-    grep -q "ANTHROPIC_AUTH_TOKEN" "$file"
+    grep -q "gpt-6-astra" "$file"
+    grep -q "https://anyrouter.top/v1" "$file"
     rm -f "$file"
 }

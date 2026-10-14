@@ -14,8 +14,9 @@ if [ "${1:-}" = "--once" ]; then
 fi
 
 # --- Configuration ---
-BASE_URL="${BASE_URL:-https://a-ocnfniawgw.cn-shanghai.fcapp.run}"
-MODEL="${MODEL:-opus[1m]}"
+BASE_URL="${BASE_URL:-https://anyrouter.top/v1}"
+MODEL="${MODEL:-gpt-6-astra}"
+WIRE_API="${WIRE_API:-responses}"
 SLEEP_BETWEEN_TOKENS="${SLEEP_BETWEEN_TOKENS:-30}"         # seconds between tokens
 SLEEP_BETWEEN_ROUNDS="${SLEEP_BETWEEN_ROUNDS:-3000}"       # ~50 minutes between rounds
 MAX_DURATION_SEC="${MAX_DURATION_SEC:-21500}"               # ~5h58m (just under 6h limit)
@@ -105,6 +106,7 @@ fi
 echo "Loaded ${#TOKENS[@]} token(s)"
 echo "Base URL: $BASE_URL"
 echo "Model: $MODEL"
+echo "Wire API: $WIRE_API"
 echo ""
 
 START_TIME=$(date +%s)
@@ -144,7 +146,7 @@ while true; do
 
         echo "[$((i+1))/${#TOKENS[@]}] Testing $token_preview ..."
 
-        if result=$(bash "$SCRIPT_DIR/keepalive.sh" "$token" "$BASE_URL" "$MODEL" 2>&1); then
+        if result=$(bash "$SCRIPT_DIR/keepalive.sh" "$token" "$BASE_URL" "$MODEL" "$WIRE_API" 2>&1); then
             echo "$result"
             echo "  ✓ $token_preview is active"
             ROUND_RESULTS+="  ✓ $token_preview is active"$'\n'

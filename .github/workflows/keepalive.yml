@@ -9,11 +9,11 @@ on:
       base_url:
         description: 'API Base URL'
         required: false
-        default: 'https://a-ocnfniawgw.cn-shanghai.fcapp.run'
+        default: 'https://anyrouter.top/v1'
       model:
-        description: 'Claude model for health checks'
+        description: 'Codex model for health checks'
         required: false
-        default: 'opus[1m]'
+        default: 'gpt-6-astra'
 
 # Prevent concurrent runs stacking up
 concurrency:
@@ -28,20 +28,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Claude Code CLI
-        run: |
-          curl -fsSL https://claude.ai/install.sh | bash
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
 
-      - name: Verify Claude CLI
-        run: claude --version
+      - name: Verify Codex CLI
+        run: codex --version
 
       - name: Run keepalive for all tokens
         env:
           ANYROUTER_TOKENS: ${{ secrets.ANYROUTER_TOKENS }}
-          BASE_URL: ${{ github.event.inputs.base_url || 'https://a-ocnfniawgw.cn-shanghai.fcapp.run' }}
-          MODEL: ${{ github.event.inputs.model || 'opus[1m]' }}
+          BASE_URL: ${{ github.event.inputs.base_url || 'https://anyrouter.top/v1' }}
+          MODEL: ${{ github.event.inputs.model || 'gpt-6-astra' }}
           QQ_EMAIL: ${{ secrets.QQ_EMAIL }}
           QQ_SMTP_AUTH_CODE: ${{ secrets.QQ_SMTP_AUTH_CODE }}
-          CI: "true"
         run: bash scripts/run-all.sh

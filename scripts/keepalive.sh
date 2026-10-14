@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# keepalive.sh - Health-check a single Anyrouter token using Claude CLI
-# Usage: keepalive.sh <token> [base_url] [model]
+# keepalive.sh - Health-check a single Anyrouter token using OpenAI Codex CLI
+# Usage: keepalive.sh <token> [base_url] [model] [wire_api]
 # Prints ALL output (including errors, retries, stack traces) for diagnostics.
 set -euo pipefail
 
-TOKEN="${1:?Usage: $0 <token> [base_url] [model]}"
-BASE_URL="${2:-https://a-ocnfniawgw.cn-shanghai.fcapp.run}"
-MODEL="${3:-opus[1m]}"
+TOKEN="${1:?Usage: $0 <token> [base_url] [model] [wire_api]}"
+BASE_URL="${2:-https://anyrouter.top/v1}"
+MODEL="${3:-gpt-6-astra}"
+WIRE_API="${4:-responses}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROMPTS_FILE="$SCRIPT_DIR/prompts.txt"
@@ -29,48 +30,55 @@ pick_prompt() {
 
 PROMPT=$(pick_prompt)
 
-# --- Atomically write settings.json ---
-SETTINGS_DIR="$HOME/.claude"
-SETTINGS_FILE="$SETTINGS_DIR/settings.json"
-TMP_FILE="$SETTINGS_DIR/settings.json.tmp.$$.$(date +%s%N)"
+# --- Atomically write Codex config.toml ---
+# Routes Codex to the Anyrouter OpenAI-compatible endpoint and forces API-key
+# auth (no interactive ChatGPT login). The token is NOT written to disk; it is
+# passed via the ANYROUTER_TOKEN env var referenced by env_key below.
+CONFIG_DIR="$HOME/.codex"
+CONFIG_FILE="$CONFIG_DIR/config.toml"
+TMP_FILE="$CONFIG_DIR/config.toml.tmp.$$.$(date +%s%N)"
 
-mkdir -p "$SETTINGS_DIR"
+mkdir -p "$CONFIG_DIR"
 
 cat > "$TMP_FILE" << EOF
-{
-  "env": {
-    "ANTHROPIC_AUTH_TOKEN": "$TOKEN",
-    "ANTHROPIC_BASE_URL": "$BASE_URL"
-  }
-}
+model = "$MODEL"
+model_provider = "anyrouter"
+preferred_auth_method = "apikey"
+forced_login_method = "api"
+
+[model_providers.anyrouter]
+name = "Anyrouter"
+base_url = "$BASE_URL"
+env_key = "ANYROUTER_TOKEN"
+wire_api = "$WIRE_API"
 EOF
-mv "$TMP_FILE" "$SETTINGS_FILE"
+mv "$TMP_FILE" "$CONFIG_FILE"
 
 # --- Run health check ---
-EXTRA_FLAGS=()
-if [ "${CI:-}" = "true" ]; then
-    EXTRA_FLAGS+=(--dangerously-skip-permissions)
-fi
-
-# Run claude with timeout to prevent infinite retry hangs.
-# Capture both stdout and stderr into a temp file, plus record exit code.
 OUTPUT_FILE=$(mktemp)
 EXIT_CODE=0
 
-# 120s timeout: if claude enters infinite retry, kill it
-timeout 120 claude -p "$PROMPT" --print --model "$MODEL" --bare "${EXTRA_FLAGS[@]}" > "$OUTPUT_FILE" 2>&1 || EXIT_CODE=$?
+# 120s timeout: if codex enters infinite retry, kill it.
+# codex exec is non-interactive by default (never pauses for approval).
+# -s read-only: model cannot modify files (safe for a health check)
+# --skip-git-repo-check: allow running outside a git repository (local testing)
+ANYROUTER_TOKEN="$TOKEN" timeout 120 codex exec \
+    -m "$MODEL" \
+    -s read-only \
+    --skip-git-repo-check \
+    "$PROMPT" > "$OUTPUT_FILE" 2>&1 || EXIT_CODE=$?
 
 # --- Print ALL output for diagnostics ---
 echo "  Prompt: ${PROMPT:0:60}..."
-echo "  --- Claude output (exit_code=$EXIT_CODE) ---"
+echo "  --- Codex output (exit_code=$EXIT_CODE) ---"
 cat "$OUTPUT_FILE" | sed 's/^/    /'
 echo "  --- End output ---"
 
 # --- Evaluate result ---
 OUTPUT_CONTENT=$(cat "$OUTPUT_FILE" 2>/dev/null || true)
 
-# Clean up
-rm -f "$OUTPUT_FILE" "$SETTINGS_FILE"
+# Clean up (best-effort; must never affect the pass/fail verdict)
+rm -f "$OUTPUT_FILE" "$CONFIG_FILE" 2>/dev/null || true
 
 # 1. Non-zero exit code is a clear failure (includes timeout exit 124)
 if [ "$EXIT_CODE" -ne 0 ]; then
@@ -83,13 +91,6 @@ if [ -z "$OUTPUT_CONTENT" ]; then
     echo "  FAILED (empty response)"
     exit 1
 fi
-
-# # 3. Check for common API error indicators that might appear even with exit 0
-# ERROR_PATTERNS="rate limit|authentication failed|unauthorized|invalid api key|connection refused|timeout|429|401|403|500|service unavailable|retry after|too many requests"
-# if echo "$OUTPUT_CONTENT" | grep -qiE "$ERROR_PATTERNS"; then
-#     echo "  FAILED (API error detected in output)"
-#     exit 1
-# fi
 
 echo "  SUCCESS"
 exit 0

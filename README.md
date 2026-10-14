@@ -1,6 +1,6 @@
 # Anyrouter Keepalive
 
-对 Anyrouter Claude API 中转站的多账号执行健康检查（保活）与恢复监控，通过 GitHub Actions 运行，让账号在调度队列中保持活跃状态，在使用时获得更高优先级。
+对 Anyrouter API 中转站的多账号执行健康检查（保活）与恢复监控，通过 GitHub Actions 运行，让账号在调度队列中保持活跃状态，在使用时获得更高优先级。
 
 ## 工作流一览
 
@@ -12,13 +12,14 @@
 
 ## 工作原理
 
-Anyrouter 的调度策略疑似为**账号级先来先用**。如果账号长时间没有请求，可能在队列中失去优先级。本项目通过定时发起轻量 Claude API 调用让账号保持活跃。
+Anyrouter 的调度策略疑似为**账号级先来先用**。如果账号长时间没有请求，可能在队列中失去优先级。本项目通过定时发起轻量 API 调用让账号保持活跃。
 
 ### Keepalive（保活）
 
 - 每天 **UTC 18:00（北京时间 02:00）** 启动一个 GitHub Actions 容器
 - 容器内部每 **50 分钟** 轮询一遍所有 token（避免 6 小时限制）
-- 每个 token 发送一条随机的真实工程提问，使用 `claude -p` 模式
+- 每个 token 发送一条随机的真实工程提问，使用 `codex exec` 模式
+- 通过 `~/.codex/config.toml` 将 Codex 指向 Anyrouter 的 OpenAI 兼容端点，token 经 `ANYROUTER_TOKEN` 环境变量传入（不落盘）
 - 在接近 6 小时限制时自动发送汇总报告邮件
 - 可选通过 QQ 邮箱接收最终报告
 
@@ -41,15 +42,15 @@ Fork 本仓库到你的 GitHub 账号下。
 
 | Secret 名称 | 说明 | 是否必需 |
 |---|---|---|
-| `ANYROUTER_TOKENS` | 你的 Anyrouter token，每行一个 | ✅ 必需 |
+| `ANYROUTER_TOKENS` | 你的 Anyrouter API key（OpenAI 兼容格式），每行一个 | ✅ 必需 |
 | `QQ_EMAIL` | QQ 邮箱地址，用于接收报告 | ❌ 可选 |
 | `QQ_SMTP_AUTH_CODE` | QQ 邮箱 SMTP 授权码 | ❌ 可选 |
 
 **ANYROUTER_TOKENS 格式：**
 ```
-sk-ant-xxx111
-sk-ant-xxx222
-sk-ant-xxx333
+sk-xxx111
+sk-xxx222
+sk-xxx333
 ```
 
 ### 3. 启用 Actions
@@ -62,15 +63,17 @@ sk-ant-xxx333
 | 保活（单次） | Actions → Anyrouter Keepalive (Once) → Run workflow |
 | 恢复监控 | Actions → Anyrouter Recovery Monitor → Run workflow |
 
-**恢复监控**在手动触发时可自定义 `base_url` 和 `model`，默认使用 `opus[1m]` + FC 端点。
+**恢复监控**在手动触发时可自定义 `base_url` 和 `model`，默认使用 `gpt-6-astra` + `https://anyrouter.top/v1` 端点。
 
 ## 本地运行
+
+本地运行需先安装 Codex CLI：`npm install -g @openai/codex`。
 
 ### 本地单次测试
 
 ```bash
 # 设置 token
-export ANYROUTER_TOKENS="sk-ant-your-token-here"
+export ANYROUTER_TOKENS="sk-your-token-here"
 
 # 运行单 token 测活
 bash scripts/keepalive.sh "$ANYROUTER_TOKENS"
@@ -80,8 +83,8 @@ bash scripts/keepalive.sh "$ANYROUTER_TOKENS"
 
 ```bash
 # 方式 1：使用环境变量
-export ANYROUTER_TOKENS="sk-ant-xxx111
-sk-ant-xxx222"
+export ANYROUTER_TOKENS="sk-xxx111
+sk-xxx222"
 export QQ_EMAIL="yourname@qq.com"
 export QQ_SMTP_AUTH_CODE="your_auth_code"
 bash scripts/run-all.sh
@@ -96,8 +99,8 @@ bash scripts/run-all.sh
 
 ```bash
 # 每 30 分钟轮询，全通且响应 <30s 自动退出
-export ANYROUTER_TOKENS="sk-ant-xxx111
-sk-ant-xxx222"
+export ANYROUTER_TOKENS="sk-xxx111
+sk-xxx222"
 export QQ_EMAIL="yourname@qq.com"
 export QQ_SMTP_AUTH_CODE="your_auth_code"
 bash scripts/monitor-recovery.sh
@@ -109,7 +112,7 @@ POLL_INTERVAL=600 MAX_DURATION_SEC=3600 bash scripts/monitor-recovery.sh
 ### 本地单次快速测试（跳过 50 分钟等待）
 
 ```bash
-export ANYROUTER_TOKENS="sk-ant-test"
+export ANYROUTER_TOKENS="sk-test"
 MAX_DURATION_SEC=60 bash scripts/run-all.sh
 ```
 
@@ -146,7 +149,7 @@ bats tests/
 │   ├── keepalive-once.yml         # 单次测活工作流（手动）
 │   └── monitor-recovery.yml       # 恢复监控工作流（手动）
 ├── scripts/
-│   ├── keepalive.sh               # 核心脚本：单 token 测活
+│   ├── keepalive.sh               # 核心脚本：单 token 测活（Codex CLI）
 │   ├── run-all.sh                 # 批量运行器：50 分钟轮询
 │   ├── monitor-recovery.sh        # 恢复监控：30 分钟轮询 + 早期退出
 │   └── prompts.txt                # prompt 池（30 条工程 + 30 条轻量）
@@ -161,6 +164,7 @@ bats tests/
 - **不要滥用**：保活仅凌晨低峰期运行，恢复监控按需手动触发，频率合理不会对 Anyrouter 造成压力
 - **遵守条款**：请遵守 Anyrouter 的使用条款和服务协议
 - **频率控制**：token 之间间隔 30 秒（带随机抖动），避免触发限流
-- **成本**：每次测活使用 `opus[1m]` 模型，通过 FC 端点直连，单次成本极低
+- **成本**：每次测活使用 `gpt-6-astra` 模型，通过 `https://anyrouter.top/v1` 端点直连，单次成本极低
+- **API 协议**：默认使用 Codex 原生 `responses` 协议；若 Anyrouter 端点仅支持 Chat Completions，请设置环境变量 `WIRE_API=chat`
 - **邮箱配置**：QQ 邮箱的 SMTP 授权码请在 QQ 邮箱 → 设置 → 账号 → POP3/IMAP/SMTP 服务 中生成
 - **Prompt 池**：共 60 条 prompt（30 条工程提问 + 30 条轻量级快速问答），每次随机选取一条发送
